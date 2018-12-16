@@ -11,9 +11,10 @@ import (
 	"net/url"
 	"strconv"
 
+	"net/http"
+
 	types "github.com/vmware/go-vcloud-director/types/v56"
 	"github.com/vmware/go-vcloud-director/util"
-	"net/http"
 )
 
 type VM struct {
@@ -220,6 +221,53 @@ func (vm *VM) ChangeCPUcount(size int) (Task, error) {
 	// The request was successful
 	return *task, nil
 
+}
+
+func (vm *VM) ChangeDiskSize(index int, size int) (Task, error) {
+	refreshUrl, _ := url.ParseRequestURI(vm.VM.HREF)
+	refreshUrl.Path += "/virtualHardwareSection/disks"
+	req := vm.client.NewRequest(map[string]string{}, "GET", *refreshUrl, nil)
+	resp, err := checkResp(vm.client.Http.Do(req))
+
+	items := &types.VCDRasdItemsList{}
+	err = decodeBody(resp, items)
+	if err != nil {
+		return Task{}, fmt.Errorf("error decoding Task response: %s", err)
+	}
+
+	for _, e := range items.VCDItem {
+		if e.VCDAddressOnParent__rasd == strconv.Itoa(index) && e.VCDResourceType__rasd == 17 {
+			e.VCDHostResource__rasd.Capacity = strconv.Itoa(size)
+		}
+	}
+
+	output, err := xml.MarshalIndent(items, "  ", "    ")
+	if err != nil {
+		fmt.Printf("error: %v\n", err)
+	}
+
+	util.Logger.Printf("\n\nXML DEBUG 5: %s\n\n", string(output))
+	buffer := bytes.NewBufferString(xml.Header + string(output))
+
+	apiEndpoint, _ := url.ParseRequestURI(vm.VM.HREF)
+	apiEndpoint.Path += "/virtualHardwareSection/disks"
+
+	req = vm.client.NewRequest(map[string]string{}, "PUT", *apiEndpoint, buffer)
+	req.Header.Add("Content-Type", "application/vnd.vmware.vcloud.rasdItemsList+xml")
+
+	resp, err = checkResp(vm.client.Http.Do(req))
+	if err != nil {
+		return Task{}, fmt.Errorf("error customizing VM: %s", err)
+	}
+
+	task := NewTask(vm.client)
+
+	if err = decodeBody(resp, task.Task); err != nil {
+		return Task{}, fmt.Errorf("error decoding Task response: %s", err)
+	}
+
+	// The request was successful
+	return *task, nil
 }
 
 func (vm *VM) ChangeNetworkConfig(networks []map[string]interface{}, ip string) (Task, error) {
